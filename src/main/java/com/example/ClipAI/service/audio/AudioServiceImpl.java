@@ -1,5 +1,6 @@
 package com.example.ClipAI.service.audio;
 
+import com.example.ClipAI.model.ClipAIRest;
 import com.example.ClipAI.model.audio.TimedWord;
 import com.example.ClipAI.model.audio.TranscriptionResult;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -52,8 +53,8 @@ public class AudioServiceImpl implements AudioService {
      * @return TranscriptionResult containing transcription details
      * @throws Exception If transcription fails
      */
-    public TranscriptionResult transcribeAudio(String audioPath) throws Exception {
-        return transcribeAudio(audioPath, WhisperModel.BASE, null);
+    public TranscriptionResult transcribeAudio(String audioPath, ClipAIRest clipAIRest) throws Exception {
+        return transcribeAudio(audioPath, WhisperModel.BASE, null, clipAIRest);
     }
 
     /**
@@ -65,7 +66,7 @@ public class AudioServiceImpl implements AudioService {
      * @return TranscriptionResult containing transcription details
      * @throws Exception If transcription fails
      */
-    public TranscriptionResult transcribeAudio(String audioPath, WhisperModel model, String language)
+    public TranscriptionResult transcribeAudio(String audioPath, WhisperModel model, String language, ClipAIRest clipAIRest)
             throws Exception {
         // Validate input
         validateAudioFile(audioPath);
@@ -85,7 +86,7 @@ public class AudioServiceImpl implements AudioService {
         }
 
         // Read and parse JSON result
-        return parseWordLevelTranscription(outputPath);
+        return parseWordLevelTranscriptionTest(outputPath, clipAIRest);
     }
 
     /**
@@ -246,6 +247,48 @@ public class AudioServiceImpl implements AudioService {
         return new TranscriptionResult(timedWords, textBuilder.toString());
     }
 
+
+    private TranscriptionResult parseWordLevelTranscriptionTest(Path outputPath, ClipAIRest clipAIRest) throws Exception {
+        File jsonFile = findJsonResultFile(outputPath.getParent().toFile());
+        StringBuilder textBuilder = new StringBuilder();
+        if (jsonFile == null) {
+            throw new RuntimeException("Transcription JSON result not found");
+        }
+
+        String jsonContent = Files.readString(jsonFile.toPath());
+        JsonNode rootNode = MAPPER.readTree(jsonContent);
+
+        int index =0;
+        List<String> originalScriptWords = Arrays.stream(clipAIRest.getScript().replaceAll("[^a-zA-Z\\s]", "").toLowerCase().split("\\s+")).toList();
+
+        // Parse result to get each word's start and end time
+        List<TimedWord> timedWords = new ArrayList<>();
+        for (JsonNode segment : rootNode.path("segments")) {
+            String text = segment.path("text").asText();
+            double start = segment.path("start").asDouble();
+            double end = segment.path("end").asDouble();
+            double confidence = segment.path("confidence").asDouble(1.0);  // Optional confidence
+
+
+            // Split sentence into words
+            String[] words = text.replaceAll("[^a-zA-Z\\s]", "").toLowerCase().split("\\s+");
+            List<String> wordsList = new ArrayList<>(Arrays.asList(words));
+            wordsList.remove(0);
+            double wordTime = (end - start)/wordsList.size();
+            System.out.println(wordsList.size());
+            for (String word : wordsList) {
+                if(index<originalScriptWords.size()) {
+                    end = start + wordTime - 0.02;
+                    textBuilder.append(word).append(" ");
+                    timedWords.add(new TimedWord(originalScriptWords.get(index), start, end, confidence));
+                    start = end + 0.02;
+                    index++;
+                }
+            }
+        }
+
+        return new TranscriptionResult(timedWords, textBuilder.toString());
+    }
     /**
      * Find the generated JSON result file
      *

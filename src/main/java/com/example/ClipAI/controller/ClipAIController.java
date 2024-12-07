@@ -55,7 +55,7 @@ public class ClipAIController {
 
     @PostMapping(value = "v1/generate/videos")
     public ClipAIRest generateVideos(@RequestBody ClipAIRest clipAIRest) {
-        videoCreator.createVideo("src/main/resources/static/narration.mp3",outputPath, "final_video.mp4");
+        videoCreator.createVideo("src/main/resources/static/narration.mp3",outputPath, "final_video.mp4", clipAIRest);
         return clipAIRest;
     }
 
@@ -95,7 +95,7 @@ public class ClipAIController {
             // Save the file
             Path filePath = Paths.get(AUDIO_UPLOAD_DIR, audioFile.getOriginalFilename());
             Files.write(filePath, audioFile.getBytes());
-            clipAIRest.setScript(audioService.transcribeAudio(AUDIO_UPLOAD_DIR).getText());
+            clipAIRest.setScript(audioService.transcribeAudio(AUDIO_UPLOAD_DIR, null).getText());
             return clipAIRest;
         } catch (IOException e) {
             return clipAIRest;

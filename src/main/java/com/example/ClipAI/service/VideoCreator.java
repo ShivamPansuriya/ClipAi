@@ -1,5 +1,6 @@
 package com.example.ClipAI.service;
 
+import com.example.ClipAI.model.ClipAIRest;
 import com.example.ClipAI.model.audio.TimedWord;
 import com.example.ClipAI.model.video.ImageTiming;
 import com.example.ClipAI.service.audio.AudioService;
@@ -41,12 +42,12 @@ public class VideoCreator {
     private AudioService audioService;
 
     // Main processing methods
-    public void createVideo(String audioPath, String imagesDir, String outputPath) {
+    public void createVideo(String audioPath, String imagesDir, String outputPath, ClipAIRest clipAIRest) {
         try {
             logger.debug("Starting video creation process...");
 
             // 1. Analyze audio and get word timings
-            List<TimedWord> timedWords = audioService.transcribeAudio(audioPath).getSegments();
+            List<TimedWord> timedWords = audioService.transcribeAudio(audioPath, clipAIRest).getSegments();
             System.out.println("Audio analysis complete. Found " + timedWords.size() + " words");
 
             // 2. Get and sort image files
