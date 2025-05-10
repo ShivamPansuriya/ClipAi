@@ -6,10 +6,8 @@ import com.example.ClipAI.model.video.ImageTiming;
 import com.example.ClipAI.service.audio.AudioService;
 import org.bytedeco.ffmpeg.global.avcodec;
 import org.bytedeco.ffmpeg.global.avutil;
-import org.bytedeco.javacv.FFmpegFrameGrabber;
-import org.bytedeco.javacv.FFmpegFrameRecorder;
+import org.bytedeco.javacv.*;
 import org.bytedeco.javacv.Frame;
-import org.bytedeco.javacv.Java2DFrameConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +18,9 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.Buffer;
+import java.nio.ByteBuffer;
+import java.nio.ShortBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -44,7 +45,7 @@ public class VideoCreator {
     // Main processing methods
     public void createVideo(String audioPath, String imagesDir, String outputPath, ClipAIRest clipAIRest) {
         try {
-            logger.debug("Starting video creation process...");
+            logger.info("Starting video creation process...");
 
             // 1. Analyze audio and get word timings
             List<TimedWord> timedWords = audioService.transcribeAudio(audioPath, clipAIRest).getSegments();
@@ -61,6 +62,7 @@ public class VideoCreator {
             // 4. Generate video
             generateVideo(audioPath, imageTiming, timedWords, outputPath);
 
+            addBackground();
             System.out.println("Video creation complete!");
 
         } catch (Exception e) {
@@ -526,7 +528,7 @@ public class VideoCreator {
         FontMetrics metrics = g.getFontMetrics(font);
         int textWidth = metrics.stringWidth(text);
         int x = (VIDEO_WIDTH - textWidth) / 2;
-        int y = VIDEO_HEIGHT - 200;
+        int y = VIDEO_HEIGHT - 400;
 
         // Draw text outline
         g.setColor(Color.BLACK);
@@ -572,5 +574,122 @@ public class VideoCreator {
 //        String audioPath = "narration.mp3";
 //        String imagesDir = "images";
 //        String outputPath = "final_video.mp4";
+
+    public void addBackground() throws FFmpegFrameGrabber.Exception {
+        String videoFilePath = "final_video.mp4";
+        String audioFilePath = "background_audio.mp3";
+        String outputFilePath = "output_video.mp4";
+
+        try (FFmpegFrameGrabber videoGrabber = new FFmpegFrameGrabber(videoFilePath);FFmpegFrameGrabber bgAudioGrabber = new FFmpegFrameGrabber(audioFilePath);){
+
+
+
+            videoGrabber.start();
+            bgAudioGrabber.start();
+
+            int videoWidth = videoGrabber.getImageWidth();
+            int videoHeight = videoGrabber.getImageHeight();
+            int audioChannels = Math.max(videoGrabber.getAudioChannels(), bgAudioGrabber.getAudioChannels());
+            int sampleRate = videoGrabber.getSampleRate();
+
+            try(FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(outputFilePath, videoWidth, videoHeight, audioChannels);)
+            {
+                recorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
+                recorder.setFormat("mp4");
+                recorder.setFrameRate(videoGrabber.getFrameRate());
+                recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
+                recorder.setSampleRate(sampleRate);
+                recorder.setAudioBitrate(192000);  // Increased for better audio quality
+                recorder.setVideoBitrate(videoGrabber.getVideoBitrate());
+                recorder.start();
+
+                Frame videoFrame;
+                Frame originalAudioFrame;
+                Frame bgAudioFrame;
+
+                // Background audio volume (0.2 = 20% of original volume)
+                float bgVolume = 0.08f;
+
+                while (( videoFrame = videoGrabber.grabFrame() ) != null)
+                {
+                    // Handle video frame
+                    if (videoFrame.image != null)
+                    {
+                        recorder.record(videoFrame);
+                    }
+
+                    // Handle audio mixing
+                    if (videoFrame.samples != null)
+                    {
+                        originalAudioFrame = videoFrame;
+                        bgAudioFrame = bgAudioGrabber.grabSamples();
+
+                        if (bgAudioFrame != null && bgAudioFrame.samples != null)
+                        {
+                            // Get the audio buffers
+                            ShortBuffer originalAudio = (ShortBuffer) originalAudioFrame.samples[ 0 ];
+                            ShortBuffer bgAudio = (ShortBuffer) bgAudioFrame.samples[ 0 ];
+
+                            // Create a new buffer for mixed audio
+                            ShortBuffer mixedAudio = ShortBuffer.allocate(originalAudio.capacity());
+
+                            // Reset buffer positions
+                            originalAudio.rewind();
+                            bgAudio.rewind();
+
+                            // Mix the audio streams
+                            while (originalAudio.hasRemaining() && bgAudio.hasRemaining())
+                            {
+                                short origSample = originalAudio.get();
+                                short bgSample = bgAudio.get();
+
+                                // Mix samples with background audio at lower volume
+                                float mixedSample = origSample + ( bgSample * bgVolume );
+
+                                // Prevent clipping
+                                mixedSample = Math.min(32767, Math.max(-32768, mixedSample));
+
+                                mixedAudio.put((short) mixedSample);
+                            }
+
+                            // Fill remaining samples if any
+                            while (originalAudio.hasRemaining())
+                            {
+                                mixedAudio.put(originalAudio.get());
+                            }
+
+                            // Prepare buffer for reading
+                            mixedAudio.flip();
+
+                            // Create new frame with mixed audio
+                            Frame mixedFrame = new Frame();
+                            mixedFrame.samples = new Buffer[]{ mixedAudio };
+                            mixedFrame.sampleRate = originalAudioFrame.sampleRate;
+                            mixedFrame.audioChannels = originalAudioFrame.audioChannels;
+
+                            // Record mixed audio
+                            recorder.record(mixedFrame);
+                        }
+                        else
+                        {
+                            // If no background audio, record original audio
+                            recorder.record(originalAudioFrame);
+                        }
+                    }
+                }
+
+                // Cleanup
+                videoGrabber.stop();
+                bgAudioGrabber.stop();
+                recorder.stop();
+
+            } catch (FFmpegFrameRecorder.Exception | FrameGrabber.Exception ex) {
+                throw new RuntimeException(ex);
+            }
+            System.out.println("Video with mixed background audio created successfully.");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
 }

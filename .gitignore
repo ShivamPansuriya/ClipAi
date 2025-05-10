@@ -18,6 +18,7 @@ target/
 *.iws
 *.iml
 *.ipr
+*.json
 
 ### NetBeans ###
 /nbproject/private/
@@ -31,3 +32,22 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Media Files ###
+*.mp4
+*.mp3
+*.wav
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.part

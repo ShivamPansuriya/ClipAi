@@ -2,10 +2,14 @@ package com.example.ClipAI.service;
 
 import com.example.ClipAI.model.ClipAIRest;
 import com.example.ClipAI.model.Image;
-import okhttp3.*;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -23,7 +27,7 @@ public class HuggingFaceService {
     private static final String HUGGING_FACE_URL =
             "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large";
     private static final String API_KEY = "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";
-    private final String outputPath = "/home/shivam/Documents/shorts/ClipAI/src/main/resources/static";
+    private final String outputPath = "C:\\Users\\pansu\\OneDrive\\Desktop\\study\\youtube\\ClipAi\\src\\main\\resources\\static";
     private final Logger logger = LoggerFactory.getLogger(HuggingFaceService.class);
     private final OkHttpClient client =
             new OkHttpClient.Builder().connectTimeout(60, TimeUnit.SECONDS).writeTimeout(60, TimeUnit.SECONDS)
@@ -31,7 +35,7 @@ public class HuggingFaceService {
                     .retryOnConnectionFailure(true).build();
 
     public boolean generateAndSaveImage(Image image, int level) {
-        logger.debug("requesting image:{}",image.getKey());
+        logger.info("requesting image:{}",image.getKey());
         boolean result = false;
         try {
             // Create output directory if it doesn't exist

@@ -1,6 +1,5 @@
 package com.example.ClipAI.model;
 
-import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 

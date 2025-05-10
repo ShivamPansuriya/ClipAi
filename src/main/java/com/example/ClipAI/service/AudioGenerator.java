@@ -26,7 +26,7 @@ public class AudioGenerator {
                     .readTimeout(60, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS)
                     .retryOnConnectionFailure(true).build();
 
-    private final String outputPath = "/home/shivam/Documents/shorts/ClipAI/src/main/resources/static";
+    private final String outputPath = "C:\\Users\\pansu\\OneDrive\\Desktop\\study\\youtube\\ClipAi\\src\\main\\resources\\static";
     private final Logger logger = LoggerFactory.getLogger(AudioGenerator.class);
 
     public void generateAudio(ClipAIRest clipAIRest) {

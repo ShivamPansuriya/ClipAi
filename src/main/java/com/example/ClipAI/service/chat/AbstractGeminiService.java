@@ -3,6 +3,7 @@ package com.example.ClipAI.service.chat;
 import com.example.ClipAI.model.ClipAIRest;
 import com.example.ClipAI.model.GeminiResponse;
 import com.example.ClipAI.model.Image;
+import com.example.ClipAI.model.youtube.VideoRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -16,7 +17,10 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,8 +28,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public abstract class AbstractGeminiService implements GeminiService{
     private static final String GEMINI_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
-//    private static final String API_KEY = "AIzaSyA9dogKPtbxw-OaDbK8qQlRUww1J4D7Kco";
-    private static final String API_KEY = "AIzaSyA2OkjubYIKKz_URfe0PokvKPwp0dZ8VtQ";
+//    private static String API_KEY = "AIzaSyA9dogKPtbxw-OaDbK8qQlRUww1J4D7Kco";
+    private static String API_KEY = "AIzaSyA2OkjubYIKKz_URfe0PokvKPwp0dZ8VtQ";
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Logger logger = LoggerFactory.getLogger(AbstractGeminiService.class);
     private final OkHttpClient client =
@@ -33,31 +37,34 @@ public abstract class AbstractGeminiService implements GeminiService{
                     .readTimeout(60, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS)
                     .retryOnConnectionFailure(true).build();
 
-    protected abstract String getPrompt(ClipAIRest clipAIRest);
+    protected abstract String getMetaData(ClipAIRest clipAIRest);
 
     @Override
-    public void generateScript(ClipAIRest clipAIRest) {
-        try {
-            // Prepare JSON payload
-            String jsonPayload = String.format("{\"contents\":[{\"parts\":[{\"text\": \"%s\"}]}]}",
-                    getPrompt(clipAIRest));
-            Response response = getResponse(GEMINI_URL, jsonPayload);
+    public void generateScript(ClipAIRest clipAIRest, ChatType chatType) {
+        if(clipAIRest.getScript() == null) {
+            try {
+                // Prepare JSON payload
+                String jsonPayload = String.format("{\"contents\":[{\"parts\":[{\"text\": \"%s\"}]}]}",
+                        chatType.getScript().formatted(clipAIRest.getTopic()));
+                Response response = getResponse(GEMINI_URL, jsonPayload);
 
-            AtomicReference<String> script = new AtomicReference<>();
+                AtomicReference<String> script = new AtomicReference<>();
 
-            if (response.body() != null) {
-                String responseBody = response.body().string();
-                GeminiResponse root = objectMapper.readValue(responseBody, GeminiResponse.class);
+                if (response.body() != null) {
+                    String responseBody = response.body().string();
+                    GeminiResponse root = objectMapper.readValue(responseBody, GeminiResponse.class);
 
-                // Extract prompts from mapped object
-                root.getCandidates().forEach(candidate -> candidate.getContent().getParts()
-                        .forEach(part -> script.set(part.getText().replaceAll("\"[^\"]*\"", ""))));
+                    // Extract prompts from mapped object
+                    root.getCandidates().forEach(candidate -> candidate.getContent().getParts()
+                            .forEach(part -> script.set(part.getText().replaceAll("\"[^\"]*\"", ""))));
+                }
+                clipAIRest.setScript(script.get());
+                response.close();
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-            clipAIRest.setScript(script.get());
-        } catch (IOException e) {
-            e.printStackTrace();
+            logger.info("script:{}", clipAIRest.getScript());
         }
-        logger.info("script:{}",clipAIRest.getScript());
     }
 
     @Override
@@ -98,6 +105,7 @@ public abstract class AbstractGeminiService implements GeminiService{
                     }
                 }));
             }
+            response.close();
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -113,12 +121,69 @@ public abstract class AbstractGeminiService implements GeminiService{
 
         // Execute request
         Response response = client.newCall(request).execute();
-
         if (!response.isSuccessful()) {
             logger.error("unable to read response fom gemini ai");
+            response.close();
             throw new IOException("Unexpected response code: " + response);
         }
 
         return response;
+    }
+
+    public void filterImages(ClipAIRest clipAIRest) {
+        String filterScript = clipAIRest.getScript().replaceAll("[^a-zA-Z\\s]", "").toLowerCase();
+        List<String> originalScriptWords = Arrays.stream(filterScript.split("\\s+")).toList();
+        for (var image : clipAIRest.getImages()) {
+            String imageName = image.getKey().toLowerCase();
+            imageName = imageName.replace('_', ' ').toLowerCase();
+            if (!filterScript.contains(imageName)) {
+                String[] imageNameParts = imageName.split(" ");
+                for (var part : imageNameParts) {
+                    if (originalScriptWords.contains(part)) {
+                        int partIndex = originalScriptWords.indexOf(part);
+                        image.setKey(String.format("%s %s %s",
+                                originalScriptWords.get(partIndex) , originalScriptWords.get(partIndex + 1)
+                                        , originalScriptWords.get(partIndex + 2)));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    public VideoRequest generateMetaData(ClipAIRest clipAIRest, VideoRequest videoRequest) {
+        String tags = "#facts  #knowledge  #viral  #new  #latest  #trending  #top  #fact #youtubeshorts  #viralshortvideo  #trendingfacts  #ytshorts  #amazing";
+        if(clipAIRest.getScript() != null) {
+            try {
+                // Prepare JSON payload
+                String jsonPayload = String.format("{\"contents\":[{\"parts\":[{\"text\": \"%s\"}]}]}",
+                        getMetaData(clipAIRest));
+                Response response = getResponse(GEMINI_URL, jsonPayload);
+
+                if (response.body() != null) {
+                    String responseBody = response.body().string();
+                    GeminiResponse root = objectMapper.readValue(responseBody, GeminiResponse.class);
+
+                    // Extract prompts from mapped object
+                    root.getCandidates().forEach(candidate -> candidate.getContent().getParts()
+                            .forEach(part -> {
+                                String imageJsonString = part.getText().replace("```json", "").replace("```", "").trim();
+
+                                // Parse the inner JSON string to get the image descriptions
+                                JSONObject imageDescriptions = new JSONObject(imageJsonString);
+                                JSONArray resultArray = imageDescriptions.getJSONArray("result");
+                                JSONObject metaData = resultArray.getJSONObject(0);
+                                videoRequest.setDescription(metaData.getString("description")+" "+tags);
+                                videoRequest.setTags(Arrays.asList(metaData.getString("tags").split(",")));
+                                videoRequest.setTitle(metaData.getString("title"));
+                            }));
+                }
+                response.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            logger.info("script:{}", clipAIRest.getScript());
+        }
+        return videoRequest;
     }
 }

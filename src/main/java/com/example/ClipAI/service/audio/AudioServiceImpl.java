@@ -3,19 +3,29 @@ package com.example.ClipAI.service.audio;
 import com.example.ClipAI.model.ClipAIRest;
 import com.example.ClipAI.model.audio.TimedWord;
 import com.example.ClipAI.model.audio.TranscriptionResult;
+import com.example.ClipAI.service.chat.AbstractGeminiService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import okhttp3.OkHttpClient;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 /**
@@ -26,6 +36,15 @@ public class AudioServiceImpl implements AudioService {
     private static final Logger LOGGER = Logger.getLogger(AudioServiceImpl.class.getName());
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private static final String PLAYHT_URL =
+            "https://api.play.ht/api/v2/tts/stream";
+    private static final String API_KEY = "0c6942d1458b4842a30e12bb5953c292";
+    private static final String USER_KEY = "I08P5DnErXRmQSnlurRrlb3YirE3";
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final OkHttpClient client =
+            new OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(60, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS)
+                    .retryOnConnectionFailure(true).build();
 
     // Transcription models
     public enum WhisperModel {
@@ -327,6 +346,61 @@ public class AudioServiceImpl implements AudioService {
         }
     }
 
+    public void generateAndSaveSpeech(String text) throws IOException {
+        // Create JSON payload
+        String jsonPayload = String.format("""
+            {
+                "voice": "s3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json",
+                "output_format": "mp3",
+                "voice_engine": "Play3.0-mini",
+                "text": "%s",
+                "seed": 3333333,
+                "temperature": 0.7,
+                "emotion": "male_happy",
+                "voice_guidance": 5,
+                "style_guidance": 15,
+                "text_guidance": 2
+            }""", text.trim());
+
+        // Set up the connection
+        URL url = new URL(PLAYHT_URL);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+
+        // Set headers
+        connection.setRequestProperty("AUTHORIZATION", API_KEY);
+        connection.setRequestProperty("X-USER-ID", USER_KEY);
+        connection.setRequestProperty("accept", "audio/mpeg");
+        connection.setRequestProperty("content-type", "application/json");
+
+        // Enable input/output
+        connection.setDoOutput(true);
+        connection.setDoInput(true);
+
+        // Write the JSON payload
+        try (OutputStream os = connection.getOutputStream()) {
+            byte[] input = jsonPayload.getBytes("UTF-8");
+            os.write(input, 0, input.length);
+        }
+
+        // Check response code
+//        int responseCode = connection.getResponseCode();
+//        if (responseCode != HttpURLConnection.HTTP_OK) {
+//            try (BufferedReader br = new BufferedReader(
+//                    new InputStreamReader(connection.getErrorStream()))) {
+//                String errorResponse = br.lines().reduce("", String::concat);
+//                throw new IOException("API request failed with code " + responseCode +
+//                        ": " + errorResponse);
+//            }
+//        }
+//
+//        // Save the audio file
+//        try (InputStream inputStream = connection.getInputStream()) {
+//            Files.copy(inputStream, Paths.get("/home/shivam/Documents/shorts/ClipAI/src/main/resources/static/narration.mp3"), StandardCopyOption.REPLACE_EXISTING);
+//        }
+//
+//        connection.disconnect();
+    }
     /**
      * Transcription result model
      */

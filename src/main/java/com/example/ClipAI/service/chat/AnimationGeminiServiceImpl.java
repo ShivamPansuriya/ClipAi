@@ -61,8 +61,13 @@ public class AnimationGeminiServiceImpl extends AbstractGeminiService implements
         return imagePromptTemplate.toString();
     }
 
+//    @Override
+//    protected String getPrompt(ClipAIRest clipAIRest) {
+//        return "";
+//    }
+
     @Override
-    protected String getPrompt(ClipAIRest clipAIRest) {
+    protected String getMetaData(ClipAIRest clipAIRest) {
         return "";
     }
 }
