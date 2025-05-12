@@ -1,90 +1,111 @@
 package com.example.ClipAI.service;
 
+import com.example.ClipAI.config.AppConfig;
 import com.example.ClipAI.model.ClipAIRest;
 import com.example.ClipAI.model.Image;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
+import com.example.ClipAI.util.FileUtils;
+import com.example.ClipAI.util.HttpUtils;
+import okhttp3.Headers;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayDeque;
 import java.util.Queue;
-import java.util.concurrent.TimeUnit;
 
+/**
+ * Service for interacting with Hugging Face API to generate images.
+ * Implements the ImageGenerationService interface.
+ */
 @Service
-public class HuggingFaceService {
-    private static final String HUGGING_FACE_URL =
-            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large";
-    private static final String API_KEY = "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";
-    private final String outputPath = "C:\\Users\\pansu\\OneDrive\\Desktop\\study\\youtube\\ClipAi\\src\\main\\resources\\static";
+public class HuggingFaceService implements ImageGenerationService {
     private final Logger logger = LoggerFactory.getLogger(HuggingFaceService.class);
-    private final OkHttpClient client =
-            new OkHttpClient.Builder().connectTimeout(60, TimeUnit.SECONDS).writeTimeout(60, TimeUnit.SECONDS)
-                    .readTimeout(120, TimeUnit.SECONDS).callTimeout(240, TimeUnit.SECONDS)
-                    .retryOnConnectionFailure(true).build();
 
+    @Autowired
+    private AppConfig appConfig;
+
+    @Autowired
+    private HttpUtils httpUtils;
+
+    @Autowired
+    private FileUtils fileUtils;
+
+    /**
+     * Generates and saves a single image.
+     *
+     * @param image The image to generate
+     * @param level Retry level (for recursive retries)
+     * @return true if successful, false otherwise
+     */
     public boolean generateAndSaveImage(Image image, int level) {
-        logger.info("requesting image:{}",image.getKey());
+        logger.info("Requesting image: {}", image.getKey());
         boolean result = false;
         try {
             // Create output directory if it doesn't exist
-            Path outputDir = Paths.get(outputPath);
-            if (!Files.exists(outputDir)) {
-                Files.createDirectories(outputDir);
-            }
+            fileUtils.ensureDirectoryExists(appConfig.getOutputDirectory());
 
             // Prepare JSON payload
-            String jsonPayload = String.format("{\"inputs\": \"%s\",\"parameters\": {\"guidance_scale\" : 5, \"width\": %d, \"height\": %d}}", image.getDescription(), image.getWidth(), image.getHeight());
+            String jsonPayload = String.format(
+                "{\"inputs\": \"%s\",\"parameters\": {\"guidance_scale\" : 5, \"width\": %d, \"height\": %d}}",
+                image.getDescription(),
+                image.getWidth(),
+                image.getHeight()
+            );
 
-            // Create request
-            RequestBody body = RequestBody.create(MediaType.parse("application/json"), jsonPayload);
-            Request request = new Request.Builder().url(HUGGING_FACE_URL)
-                    .addHeader("Authorization", "Bearer " + API_KEY).post(body).build();
+            // Create headers
+            Headers headers = httpUtils.createHeaders(
+                "Authorization", "Bearer " + appConfig.getHuggingFaceApiKey(),
+                "Content-Type", "application/json"
+            );
 
             // Execute request
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    if (level < 5) {
-                        logger.error("Unexpected response code: {} for image: {}", response.code(),
-                                image.getKey());
-                        return generateAndSaveImage(image, ++level);
-                    }
-                    return false;
-                }
-
+            try (Response response = httpUtils.postJson(appConfig.getHuggingFaceUrl(), jsonPayload, headers)) {
                 // Save the image
                 ResponseBody responseBody = response.body();
                 if (responseBody != null) {
                     // Create full file path with .png extension
                     String fileName = image.getKey().replaceAll("[^a-zA-Z0-9.-]", "_") + ".png";
-                    File outputFile = new File(outputDir.toFile(), fileName);
+                    Path outputPath = Paths.get(appConfig.getOutputDirectory(), fileName);
 
                     // Save image data to file
-                    try (FileOutputStream fos = new FileOutputStream(outputFile)) {
-                        fos.write(responseBody.bytes());
-                        logger.info("Successfully saved image: {}", fileName);
-                        result = true;
-                    }
+                    fileUtils.saveBinaryFile(responseBody.bytes(), outputPath.toString());
+                    logger.info("Successfully saved image: {}", fileName);
+                    result = true;
                 }
             }
         } catch (IOException e) {
             logger.error("Error while generating/saving image: {} - {}", image.getKey(), e.getMessage());
+            // Retry logic
+            if (level < 5) {
+                logger.info("Retrying image generation for: {}, attempt: {}", image.getKey(), level + 1);
+                try {
+                    Thread.sleep(2000); // Wait before retry
+                    return generateAndSaveImage(image, level + 1);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
         return result;
     }
 
+    /**
+     * Generates and saves all images in the ClipAIRest object.
+     *
+     * @param clipAIRest The ClipAIRest object containing images to generate
+     */
     public void generateAndSaveImage(ClipAIRest clipAIRest) {
+        if (clipAIRest.getImages() == null || clipAIRest.getImages().isEmpty()) {
+            logger.warn("No images to generate");
+            return;
+        }
+
         Queue<Image> images = new ArrayDeque<>(clipAIRest.getImages());
         int maxRetries = 5;
         int currentRetry = 0;
